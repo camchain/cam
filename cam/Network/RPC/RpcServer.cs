@@ -65,6 +65,8 @@ namespace Cam.Network.RPC
             return json;
         }
 
+       
+
         protected virtual JObject Process(string method, JArray _params)
         {
             switch (method)
@@ -192,6 +194,14 @@ namespace Cam.Network.RPC
                         UInt256 hash = UInt256.Parse(_params[0].AsString());
                         ushort index = (ushort)_params[1].AsNumber();
                         return Blockchain.Default.GetUnspent(hash, index)?.ToJson(index);
+                    }
+                case "getaccountmsg":
+                    {
+                        string nep2str = _params[0].AsString();
+                        string password = _params[1].AsString();
+
+                        JObject reJ = Cam.Implementations.Wallets.NEP6.NEP6Wallet.getAccountMsg(nep2str, password);
+                        return reJ;
                     }
                 case "invoke":
                     {

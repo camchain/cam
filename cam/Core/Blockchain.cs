@@ -25,7 +25,7 @@ namespace Cam.Core
 
 
 
-        public static readonly uint[] GenerationAmount = { 20, 16, 13, 11, 9, 7, 5, 3, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1 };//100份
+        public static readonly uint[] GenerationAmount = { 20, 16, 13, 11, 9, 7, 5, 3, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1 };
 
 
 
@@ -42,9 +42,8 @@ namespace Cam.Core
 #pragma warning disable CS0612
         public static readonly RegisterTransaction GoverningToken = new RegisterTransaction
         {
-            AssetType = AssetType.GoverningToken,
-
-            Name = "[{\"lang\":\"zh-CN\",\"name\":\"中企矩阵\"},{\"lang\":\"en\",\"name\":\"CAM\"}]",
+            AssetType = AssetType.GoverningToken,            
+            Name = "[{\"lang\":\"zh-CN\",\"name\":\"CAM\"},{\"lang\":\"en\",\"name\":\"CAM\"}]",
             Amount = Fixed8.FromDecimal(CAMShare),
             Precision = 0,
             Owner = ECCurve.Secp256r1.Infinity,
@@ -57,9 +56,8 @@ namespace Cam.Core
 
         public static readonly RegisterTransaction UtilityToken = new RegisterTransaction
         {
-            AssetType = AssetType.UtilityToken,
-
-            Name = "[{\"lang\":\"zh-CN\",\"name\":\"中企矩阵代币\"},{\"lang\":\"en\",\"name\":\"GAS\"}]",
+            AssetType = AssetType.UtilityToken,            
+            Name = "[{\"lang\":\"zh-CN\",\"name\":\"GAS\"},{\"lang\":\"en\",\"name\":\"GAS\"}]",
             Amount = Fixed8.FromDecimal(GenerationAmount.Sum(p => p) * DecrementInterval),
             Precision = 8,
             Owner = ECCurve.Secp256r1.Infinity,
@@ -75,12 +73,11 @@ namespace Cam.Core
 
         public static readonly Block GenesisBlock = new Block
         {
-            PrevHash = UInt256.Zero,
-
+            PrevHash = UInt256.Zero,            
             Timestamp = (new DateTime(2017, 11, 15, 8, 0, 0, DateTimeKind.Utc)).ToTimestamp(),
             Index = 0,
 
-            ConsensusData = 88596195, //随机生成
+            ConsensusData = 88596195, 
             NextConsensus = GetConsensusAddress(StandbyValidators),
             Script = new Witness
             {
@@ -271,6 +268,11 @@ namespace Cam.Core
         public abstract AccountState GetAccountState(UInt160 script_hash);
 
         public abstract AssetState GetAssetState(UInt256 asset_id);
+
+
+
+
+        public abstract List<AssetState> GetAllAssetState();
 
 
 

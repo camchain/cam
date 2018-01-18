@@ -283,6 +283,30 @@ namespace Cam.Implementations.Wallets.NEP6
             }
         }
 
+        public static JObject getAccountMsg(string nep2str, string password)
+        {
+            JObject json = new JObject();
+
+            byte[] prikey = Wallet.GetPrivateKeyFromNEP2(nep2str, password);
+
+            KeyPair keyPair = new KeyPair(prikey);
+
+            NEP6Contract contract = new NEP6Contract
+            {
+                Script = Contract.CreateSignatureRedeemScript(keyPair.PublicKey),
+                ParameterList = new[] { ContractParameterType.Signature },
+                ParameterNames = new[] { "signature" },
+                Deployed = false
+            };
+
+            json["private_key"] = prikey.ToHexString();
+            json["public_key"] = keyPair.PublicKey.EncodePoint(true).ToHexString();
+            json["address"] = contract.Address;
+            json["wif"] = keyPair.Export();
+
+            return json;
+        }
+
         public override WalletAccount Import(X509Certificate2 cert)
         {
             KeyPair key;

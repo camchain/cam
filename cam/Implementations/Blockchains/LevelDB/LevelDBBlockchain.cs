@@ -196,6 +196,11 @@ namespace Cam.Implementations.Blockchains.LevelDB
             return db.TryGet<AssetState>(ReadOptions.Default, DataEntryPrefix.ST_Asset, asset_id);
         }
 
+        public override List<AssetState> GetAllAssetState()
+        {
+            return db.Find<AssetState>(ReadOptions.Default, DataEntryPrefix.ST_Asset).ToList();
+        }
+
         public override Block GetBlock(UInt256 hash)
         {
             return GetBlockInternal(ReadOptions.Default, hash);

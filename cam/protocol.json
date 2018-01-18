@@ -1,4 +1,4 @@
-﻿{
+{
   "ProtocolConfiguration": {
     "Magic": 8229305,
     "AddressVersion": 23,
@@ -12,12 +12,12 @@
       "02d6d2032b4cd0e5b4c87675afb72234ee19ae6840bfc696e56adace062f7dda51"
     ],
     "SeedList": [
-      "192.168.10.158:16333",
-      "192.168.10.164:16333",
-      "192.168.10.153:16333",
-      "192.168.10.159:16333",
-      "192.168.10.123:16333",
-      "192.168.10.120:16333"
+      "node1.camatrix.org:16333",
+      "node2.camatrix.org:16333",
+      "node3.camatrix.org:16333",
+      "node4.camatrix.org:16333",
+      "node5.camatrix.org:16333",
+      "node6.camatrix.org:16333"
 
     ],
     "SystemFee": {
