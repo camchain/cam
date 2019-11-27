@@ -1,10 +1,9 @@
-﻿using Cam.VM;
-
-namespace Cam.SmartContract
+﻿namespace Cam.SmartContract
 {
-    internal class StorageContext : IInteropInterface
+    internal class StorageContext
     {
         public UInt160 ScriptHash;
+        public bool IsReadOnly;
 
         public byte[] ToArray()
         {

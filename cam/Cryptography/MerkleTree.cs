@@ -5,9 +5,6 @@ using System.Linq;
 
 namespace Cam.Cryptography
 {
-
-
-
     public class MerkleTree
     {
         private MerkleTreeNode root;
@@ -48,10 +45,6 @@ namespace Cam.Cryptography
             return Build(parents); //TailCall
         }
 
-
-
-
-
         public static UInt256 ComputeRoot(UInt256[] hashes)
         {
             if (hashes.Length == 0) throw new ArgumentException();
@@ -64,7 +57,7 @@ namespace Cam.Cryptography
         {
             if (node.LeftChild == null)
             {
-
+                // if left is null, then right must be null
                 hashes.Add(node.Hash);
             }
             else
@@ -74,6 +67,7 @@ namespace Cam.Cryptography
             }
         }
 
+        // depth-first order
         public UInt256[] ToHashArray()
         {
             List<UInt256> hashes = new List<UInt256>();

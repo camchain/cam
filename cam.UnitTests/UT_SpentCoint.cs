@@ -1,9 +1,7 @@
 using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using Cam.Core;
-using System.Collections.Generic;
-using System.IO;
-using System.Text;
+using Cam.Ledger;
+using Cam.Network.P2P.Payloads;
 
 namespace Cam.UnitTests
 {

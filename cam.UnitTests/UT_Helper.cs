@@ -1,8 +1,7 @@
-﻿using System.Collections.Generic;
-using System.Text;
+﻿using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using FluentAssertions;
-using Cam.Core;
+using Cam.Network.P2P;
+using Cam.SmartContract;
 using Cam.Wallets;
 
 namespace Cam.UnitTests

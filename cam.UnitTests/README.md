@@ -28,7 +28,6 @@ Coverage
 	* Header.cs
 	* Helper.cs
 	* InvocationTransaction.cs
-	* IssueTransaction.cs
 	* MinerTransaction.cs
 	* SpentCoin.cs
 	* SpentCoinState.cs
@@ -39,5 +38,4 @@ Coverage
 	* TransactionResult.cs
 	* UnspentCoinState.cs
 	* ValidatorState.cs
-	* VoteState.cs
 	* Witness.cs

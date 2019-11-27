@@ -1,27 +1,32 @@
-﻿using Cam.Core;
-using Cam.IO;
+﻿using Cam.IO;
 using Cam.IO.Data.LevelDB;
+using Cam.Ledger;
+using Cam.Network.P2P.Payloads;
+using Cam.Persistence;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Threading;
 
 namespace Cam.Wallets
 {
-    public static class WalletIndexer
+    public class WalletIndexer : IDisposable
     {
-        public static event EventHandler<BalanceEventArgs> BalanceChanged;
+        public event EventHandler<WalletTransactionEventArgs> WalletTransaction;
 
-        private static readonly Dictionary<uint, HashSet<UInt160>> indexes = new Dictionary<uint, HashSet<UInt160>>();
-        private static readonly Dictionary<UInt160, HashSet<CoinReference>> accounts_tracked = new Dictionary<UInt160, HashSet<CoinReference>>();
-        private static readonly Dictionary<CoinReference, Coin> coins_tracked = new Dictionary<CoinReference, Coin>();
+        private readonly Dictionary<uint, HashSet<UInt160>> indexes = new Dictionary<uint, HashSet<UInt160>>();
+        private readonly Dictionary<UInt160, HashSet<CoinReference>> accounts_tracked = new Dictionary<UInt160, HashSet<CoinReference>>();
+        private readonly Dictionary<CoinReference, Coin> coins_tracked = new Dictionary<CoinReference, Coin>();
 
-        private static readonly DB db;
-        private static readonly object SyncRoot = new object();
+        private readonly DB db;
+        private readonly Thread thread;
+        private readonly object SyncRoot = new object();
+        private bool disposed = false;
 
-        public static uint IndexHeight
+        public uint IndexHeight
         {
             get
             {
@@ -33,22 +38,23 @@ namespace Cam.Wallets
             }
         }
 
-        static WalletIndexer()
+        public WalletIndexer(string path)
         {
-            string path = $"Index_{Settings.Default.Magic:X8}";
+            path = Path.GetFullPath(path);
             Directory.CreateDirectory(path);
             db = DB.Open(path, new Options { CreateIfMissing = true });
-            if (db.TryGet(ReadOptions.Default, SliceBuilder.Begin(DataEntryPrefix.SYS_Version), out Slice value) && Version.TryParse(value.ToString(), out _))
+            if (db.TryGet(ReadOptions.Default, SliceBuilder.Begin(DataEntryPrefix.SYS_Version), out Slice value) && Version.TryParse(value.ToString(), out Version version) && version >= Version.Parse("2.5.4"))
             {
                 ReadOptions options = new ReadOptions { FillCache = false };
-                foreach (var group in db.Find(options, SliceBuilder.Begin(DataEntryPrefix.ST_Account), (k, v) => new
+                foreach (var group in db.Find(options, SliceBuilder.Begin(DataEntryPrefix.IX_Group), (k, v) => new
                 {
-                    Account = new UInt160(k.ToArray().Skip(1).ToArray()),
-                    Height = v.ToUInt32()
-                }).GroupBy(p => p.Height, p => p.Account))
+                    Height = k.ToUInt32(1),
+                    Id = v.ToArray()
+                }))
                 {
-                    indexes.Add(group.Key, new HashSet<UInt160>(group));
-                    foreach (UInt160 account in group)
+                    UInt160[] accounts = db.Get(options, SliceBuilder.Begin(DataEntryPrefix.IX_Accounts).Add(group.Id)).ToArray().AsSerializableArray<UInt160>();
+                    indexes.Add(group.Height, new HashSet<UInt160>(accounts));
+                    foreach (UInt160 account in accounts)
                         accounts_tracked.Add(account, new HashSet<CoinReference>());
                 }
                 foreach (Coin coin in db.Find(options, SliceBuilder.Begin(DataEntryPrefix.ST_Coin), (k, v) => new Coin
@@ -76,7 +82,7 @@ namespace Cam.Wallets
                 batch.Put(SliceBuilder.Begin(DataEntryPrefix.SYS_Version), Assembly.GetExecutingAssembly().GetName().Version.ToString());
                 db.Write(WriteOptions.Default, batch);
             }
-            Thread thread = new Thread(ProcessBlocks)
+            thread = new Thread(ProcessBlocks)
             {
                 IsBackground = true,
                 Name = $"{nameof(WalletIndexer)}.{nameof(ProcessBlocks)}"
@@ -84,7 +90,14 @@ namespace Cam.Wallets
             thread.Start();
         }
 
-        public static IEnumerable<Coin> GetCoins(IEnumerable<UInt160> accounts)
+        public void Dispose()
+        {
+            disposed = true;
+            thread.Join();
+            db.Dispose();
+        }
+
+        public IEnumerable<Coin> GetCoins(IEnumerable<UInt160> accounts)
         {
             lock (SyncRoot)
             {
@@ -94,21 +107,29 @@ namespace Cam.Wallets
             }
         }
 
-        public static IEnumerable<UInt256> GetTransactions(IEnumerable<UInt160> accounts)
+        private static byte[] GetGroupId()
         {
-            ReadOptions options = new ReadOptions { FillCache = false };
-            using (options.Snapshot = db.GetSnapshot())
+            byte[] groupId = new byte[32];
+            using (RandomNumberGenerator rng = RandomNumberGenerator.Create())
             {
-                IEnumerable<UInt256> results = Enumerable.Empty<UInt256>();
-                foreach (UInt160 account in accounts)
-                    results = results.Union(db.Find(options, SliceBuilder.Begin(DataEntryPrefix.ST_Transaction).Add(account), (k, v) => new UInt256(k.ToArray().Skip(21).ToArray())));
-                foreach (UInt256 hash in results)
-                    yield return hash;
+                rng.GetBytes(groupId);
             }
+            return groupId;
         }
 
-        private static void ProcessBlock(Block block, HashSet<UInt160> accounts, WriteBatch batch)
+        public IEnumerable<UInt256> GetTransactions(IEnumerable<UInt160> accounts)
         {
+            ReadOptions options = new ReadOptions { FillCache = false };
+            IEnumerable<UInt256> results = Enumerable.Empty<UInt256>();
+            foreach (UInt160 account in accounts)
+                results = results.Union(db.Find(options, SliceBuilder.Begin(DataEntryPrefix.ST_Transaction).Add(account), (k, v) => new UInt256(k.ToArray().Skip(21).ToArray())));
+            foreach (UInt256 hash in results)
+                yield return hash;
+        }
+
+        private (Transaction, UInt160[])[] ProcessBlock(Block block, HashSet<UInt160> accounts, WriteBatch batch)
+        {
+            var change_set = new List<(Transaction, UInt160[])>();
             foreach (Transaction tx in block.Transactions)
             {
                 HashSet<UInt160> accounts_changed = new HashSet<UInt160>();
@@ -158,120 +179,167 @@ namespace Cam.Wallets
                         accounts_changed.Add(coin.Output.ScriptHash);
                     }
                 }
-                if (tx is ClaimTransaction ctx)
+                switch (tx)
                 {
-                    foreach (CoinReference claim in ctx.Claims)
-                    {
-                        if (coins_tracked.TryGetValue(claim, out Coin coin))
+                    case MinerTransaction _:
+                    case ContractTransaction _:
+#pragma warning disable CS0612
+                    case PublishTransaction _:
+#pragma warning restore CS0612
+                        break;
+                    case ClaimTransaction tx_claim:
+                        foreach (CoinReference claim in tx_claim.Claims)
                         {
-                            accounts_tracked[coin.Output.ScriptHash].Remove(claim);
-                            coins_tracked.Remove(claim);
-                            batch.Delete(DataEntryPrefix.ST_Coin, claim);
-                            accounts_changed.Add(coin.Output.ScriptHash);
+                            if (coins_tracked.TryGetValue(claim, out Coin coin))
+                            {
+                                accounts_tracked[coin.Output.ScriptHash].Remove(claim);
+                                coins_tracked.Remove(claim);
+                                batch.Delete(DataEntryPrefix.ST_Coin, claim);
+                                accounts_changed.Add(coin.Output.ScriptHash);
+                            }
                         }
-                    }
+                        break;
+#pragma warning disable CS0612
+                    case EnrollmentTransaction tx_enrollment:
+                        if (accounts_tracked.ContainsKey(tx_enrollment.ScriptHash))
+                            accounts_changed.Add(tx_enrollment.ScriptHash);
+                        break;
+                    case RegisterTransaction tx_register:
+                        if (accounts_tracked.ContainsKey(tx_register.OwnerScriptHash))
+                            accounts_changed.Add(tx_register.OwnerScriptHash);
+                        break;
+#pragma warning restore CS0612
+                    default:
+                        foreach (UInt160 hash in tx.Witnesses.Select(p => p.ScriptHash))
+                            if (accounts_tracked.ContainsKey(hash))
+                                accounts_changed.Add(hash);
+                        break;
                 }
                 if (accounts_changed.Count > 0)
                 {
                     foreach (UInt160 account in accounts_changed)
                         batch.Put(SliceBuilder.Begin(DataEntryPrefix.ST_Transaction).Add(account).Add(tx.Hash), false);
-                    BalanceChanged?.Invoke(null, new BalanceEventArgs
-                    {
-                        Transaction = tx,
-                        RelatedAccounts = accounts_changed.ToArray(),
-                        Height = block.Index,
-                        Time = block.Timestamp
-                    });
+                    change_set.Add((tx, accounts_changed.ToArray()));
                 }
             }
+            return change_set.ToArray();
         }
 
-        private static void ProcessBlocks()
+        private void ProcessBlocks()
         {
-            bool need_sleep = false;
-            for (; ; )
+            while (!disposed)
             {
-                if (need_sleep)
+                while (!disposed)
                 {
-                    Thread.Sleep(2000);
-                    need_sleep = false;
-                }
-                lock (SyncRoot)
-                {
-                    if (indexes.Count == 0)
+                    Block block;
+                    (Transaction, UInt160[])[] change_set;
+                    lock (SyncRoot)
                     {
-                        need_sleep = true;
-                        continue;
+                        if (indexes.Count == 0) break;
+                        uint height = indexes.Keys.Min();
+                        block = Blockchain.Singleton.Store.GetBlock(height);
+                        if (block == null) break;
+                        WriteBatch batch = new WriteBatch();
+                        HashSet<UInt160> accounts = indexes[height];
+                        change_set = ProcessBlock(block, accounts, batch);
+                        ReadOptions options = ReadOptions.Default;
+                        byte[] groupId = db.Get(options, SliceBuilder.Begin(DataEntryPrefix.IX_Group).Add(height)).ToArray();
+                        indexes.Remove(height);
+                        batch.Delete(SliceBuilder.Begin(DataEntryPrefix.IX_Group).Add(height));
+                        height++;
+                        if (indexes.TryGetValue(height, out HashSet<UInt160> accounts_next))
+                        {
+                            accounts_next.UnionWith(accounts);
+                            groupId = db.Get(options, SliceBuilder.Begin(DataEntryPrefix.IX_Group).Add(height)).ToArray();
+                            batch.Put(SliceBuilder.Begin(DataEntryPrefix.IX_Accounts).Add(groupId), accounts_next.ToArray().ToByteArray());
+                        }
+                        else
+                        {
+                            indexes.Add(height, accounts);
+                            batch.Put(SliceBuilder.Begin(DataEntryPrefix.IX_Group).Add(height), groupId);
+                        }
+                        db.Write(WriteOptions.Default, batch);
                     }
-                    uint height = indexes.Keys.Min();
-                    Block block = Blockchain.Default?.GetBlock(height);
-                    if (block == null)
+                    foreach (var (tx, accounts) in change_set)
                     {
-                        need_sleep = true;
-                        continue;
+                        WalletTransaction?.Invoke(null, new WalletTransactionEventArgs
+                        {
+                            Transaction = tx,
+                            RelatedAccounts = accounts,
+                            Height = block.Index,
+                            Time = block.Timestamp
+                        });
                     }
-                    WriteBatch batch = new WriteBatch();
-                    HashSet<UInt160> accounts = indexes[height];
-                    ProcessBlock(block, accounts, batch);
-                    indexes.Remove(height++);
-                    foreach (UInt160 account in accounts)
-                        batch.Put(SliceBuilder.Begin(DataEntryPrefix.ST_Account).Add(account), height);
-                    db.Write(WriteOptions.Default, batch);
-                    if (indexes.TryGetValue(height, out HashSet<UInt160> accounts_next))
-                        accounts_next.UnionWith(accounts);
-                    else
-                        indexes.Add(height, accounts);
                 }
+                for (int i = 0; i < 20 && !disposed; i++)
+                    Thread.Sleep(100);
             }
         }
 
-        public static void RebuildIndex()
+        public void RebuildIndex()
         {
             lock (SyncRoot)
             {
                 WriteBatch batch = new WriteBatch();
-                foreach (UInt160 account in accounts_tracked.Keys)
-                    batch.Put(SliceBuilder.Begin(DataEntryPrefix.ST_Account).Add(account), 0u);
+                ReadOptions options = new ReadOptions { FillCache = false };
+                foreach (uint height in indexes.Keys)
+                {
+                    byte[] groupId = db.Get(options, SliceBuilder.Begin(DataEntryPrefix.IX_Group).Add(height)).ToArray();
+                    batch.Delete(SliceBuilder.Begin(DataEntryPrefix.IX_Group).Add(height));
+                    batch.Delete(SliceBuilder.Begin(DataEntryPrefix.IX_Accounts).Add(groupId));
+                }
+                indexes.Clear();
+                if (accounts_tracked.Count > 0)
+                {
+                    indexes[0] = new HashSet<UInt160>(accounts_tracked.Keys);
+                    byte[] groupId = GetGroupId();
+                    batch.Put(SliceBuilder.Begin(DataEntryPrefix.IX_Group).Add(0u), groupId);
+                    batch.Put(SliceBuilder.Begin(DataEntryPrefix.IX_Accounts).Add(groupId), accounts_tracked.Keys.ToArray().ToByteArray());
+                    foreach (HashSet<CoinReference> coins in accounts_tracked.Values)
+                        coins.Clear();
+                }
                 foreach (CoinReference reference in coins_tracked.Keys)
                     batch.Delete(DataEntryPrefix.ST_Coin, reference);
-                
-
-                ReadOptions options = new ReadOptions { FillCache = false };
-
-                
+                coins_tracked.Clear();
                 foreach (Slice key in db.Find(options, SliceBuilder.Begin(DataEntryPrefix.ST_Transaction), (k, v) => k))
                     batch.Delete(key);
                 db.Write(WriteOptions.Default, batch);
-                indexes.Clear();
-                if (accounts_tracked.Count > 0)
-                    indexes[0] = new HashSet<UInt160>(accounts_tracked.Keys);
-                foreach (HashSet<CoinReference> coins in accounts_tracked.Values)
-                    coins.Clear();
-                coins_tracked.Clear();
             }
         }
 
-        public static void RegisterAccounts(IEnumerable<UInt160> accounts, uint height = 0)
+        public void RegisterAccounts(IEnumerable<UInt160> accounts, uint height = 0)
         {
             lock (SyncRoot)
             {
-                WriteBatch batch = new WriteBatch();
                 bool index_exists = indexes.TryGetValue(height, out HashSet<UInt160> index);
                 if (!index_exists) index = new HashSet<UInt160>();
                 foreach (UInt160 account in accounts)
                     if (!accounts_tracked.ContainsKey(account))
                     {
-                        batch.Put(SliceBuilder.Begin(DataEntryPrefix.ST_Account).Add(account), height);
                         index.Add(account);
                         accounts_tracked.Add(account, new HashSet<CoinReference>());
                     }
-                if (!index_exists && index.Count > 0)
-                    indexes.Add(height, index);
-                db.Write(WriteOptions.Default, batch);
+                if (index.Count > 0)
+                {
+                    WriteBatch batch = new WriteBatch();
+                    byte[] groupId;
+                    if (!index_exists)
+                    {
+                        indexes.Add(height, index);
+                        groupId = GetGroupId();
+                        batch.Put(SliceBuilder.Begin(DataEntryPrefix.IX_Group).Add(height), groupId);
+                    }
+                    else
+                    {
+                        groupId = db.Get(ReadOptions.Default, SliceBuilder.Begin(DataEntryPrefix.IX_Group).Add(height)).ToArray();
+                    }
+                    batch.Put(SliceBuilder.Begin(DataEntryPrefix.IX_Accounts).Add(groupId), index.ToArray().ToByteArray());
+                    db.Write(WriteOptions.Default, batch);
+                }
             }
         }
 
-        public static void UnregisterAccounts(IEnumerable<UInt160> accounts)
+        public void UnregisterAccounts(IEnumerable<UInt160> accounts)
         {
             lock (SyncRoot)
             {
@@ -281,14 +349,22 @@ namespace Cam.Wallets
                 {
                     if (accounts_tracked.TryGetValue(account, out HashSet<CoinReference> references))
                     {
-                        batch.Delete(DataEntryPrefix.ST_Account, account);
                         foreach (uint height in indexes.Keys.ToArray())
                         {
                             HashSet<UInt160> index = indexes[height];
                             if (index.Remove(account))
                             {
+                                byte[] groupId = db.Get(options, SliceBuilder.Begin(DataEntryPrefix.IX_Group).Add(height)).ToArray();
                                 if (index.Count == 0)
+                                {
                                     indexes.Remove(height);
+                                    batch.Delete(SliceBuilder.Begin(DataEntryPrefix.IX_Group).Add(height));
+                                    batch.Delete(SliceBuilder.Begin(DataEntryPrefix.IX_Accounts).Add(groupId));
+                                }
+                                else
+                                {
+                                    batch.Put(SliceBuilder.Begin(DataEntryPrefix.IX_Accounts).Add(groupId), index.ToArray().ToByteArray());
+                                }
                                 break;
                             }
                         }

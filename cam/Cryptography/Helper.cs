@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Cam.IO;
+using Cam.Network.P2P.Payloads;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -9,9 +11,6 @@ using System.Threading;
 
 namespace Cam.Cryptography
 {
-
-
-
     public static class Helper
     {
         private static ThreadLocal<SHA256> _sha256 = new ThreadLocal<SHA256>(() => SHA256.Create());
@@ -92,10 +91,6 @@ namespace Cam.Cryptography
             return Base58.Encode(buffer);
         }
 
-
-
-
-
         public static byte[] RIPEMD160(this IEnumerable<byte> value)
         {
             return _ripemd160.Value.ComputeHash(value.ToArray());
@@ -109,24 +104,28 @@ namespace Cam.Cryptography
             }
         }
 
-
-
-
-
         public static byte[] Sha256(this IEnumerable<byte> value)
         {
             return _sha256.Value.ComputeHash(value.ToArray());
         }
 
-
-
-
-
-
-
         public static byte[] Sha256(this byte[] value, int offset, int count)
         {
             return _sha256.Value.ComputeHash(value, offset, count);
+        }
+
+        internal static bool Test(this BloomFilter filter, Transaction tx)
+        {
+            if (filter.Check(tx.Hash.ToArray())) return true;
+            if (tx.Outputs.Any(p => filter.Check(p.ScriptHash.ToArray()))) return true;
+            if (tx.Inputs.Any(p => filter.Check(p.ToArray()))) return true;
+            if (tx.Witnesses.Any(p => filter.Check(p.ScriptHash.ToArray())))
+                return true;
+#pragma warning disable CS0612
+            if (tx is RegisterTransaction asset)
+                if (filter.Check(asset.Admin.ToArray())) return true;
+#pragma warning restore CS0612
+            return false;
         }
 
         internal static byte[] ToAesKey(this string password)

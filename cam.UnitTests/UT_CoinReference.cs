@@ -1,12 +1,10 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-using FluentAssertions;
+﻿using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using Cam.Core;
-using System.IO;
 using Cam.IO;
 using Cam.IO.Json;
+using Cam.Network.P2P.Payloads;
+using System.IO;
+using System.Text;
 
 namespace Cam.UnitTests
 {

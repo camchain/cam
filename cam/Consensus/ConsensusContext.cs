@@ -1,55 +1,157 @@
-﻿using Cam.Core;
 using Cam.Cryptography;
 using Cam.Cryptography.ECC;
 using Cam.IO;
-using Cam.Network.Payloads;
+using Cam.Ledger;
+using Cam.Network.P2P.Payloads;
+using Cam.Persistence;
+using Cam.Plugins;
+using Cam.SmartContract;
 using Cam.Wallets;
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 namespace Cam.Consensus
 {
-    internal class ConsensusContext
+    internal class ConsensusContext : IConsensusContext
     {
+        /// <summary>
+        /// Prefix for saving consensus state.
+        /// </summary>
+        public const byte CN_Context = 0xf4;
+
         public const uint Version = 0;
-        public ConsensusState State;
-        public UInt256 PrevHash;
-        public uint BlockIndex;
-        public byte ViewNumber;
-        public ECPoint[] Validators;
-        public int MyIndex;
-        public uint PrimaryIndex;
-        public uint Timestamp;
-        public ulong Nonce;
-        public UInt160 NextConsensus;
-        public UInt256[] TransactionHashes;
-        public Dictionary<UInt256, Transaction> Transactions;
-        public byte[][] Signatures;
-        public byte[] ExpectedView;
-        public KeyPair KeyPair;
+        public uint BlockIndex { get; set; }
+        public UInt256 PrevHash { get; set; }
+        public byte ViewNumber { get; set; }
+        public ECPoint[] Validators { get; set; }
+        public int MyIndex { get; set; }
+        public uint PrimaryIndex { get; set; }
+        public uint Timestamp { get; set; }
+        public ulong Nonce { get; set; }
+        public UInt160 NextConsensus { get; set; }
+        public UInt256[] TransactionHashes { get; set; }
+        public Dictionary<UInt256, Transaction> Transactions { get; set; }
+        public ConsensusPayload[] PreparationPayloads { get; set; }
+        public ConsensusPayload[] CommitPayloads { get; set; }
+        public ConsensusPayload[] ChangeViewPayloads { get; set; }
+        public ConsensusPayload[] LastChangeViewPayloads { get; set; }
+        // LastSeenMessage array stores the height of the last seen message, for each validator.
+        // if this node never heard from validator i, LastSeenMessage[i] will be -1.
+        public int[] LastSeenMessage { get; set; }
+        public Block Block { get; set; }
+        public Snapshot Snapshot { get; private set; }
+        private KeyPair keyPair;
+        private readonly Wallet wallet;
+        private readonly Store store;
 
-        public int M => Validators.Length - (Validators.Length - 1) / 3;
+        public int Size => throw new NotImplementedException();
 
-        public void ChangeView(byte view_number)
+        public ConsensusContext(Wallet wallet, Store store)
         {
-            int p = ((int)BlockIndex - view_number) % Validators.Length;
-            State &= ConsensusState.SignatureSent;
-            ViewNumber = view_number;
-            PrimaryIndex = p >= 0 ? (uint)p : (uint)(p + Validators.Length);
-            if (State == ConsensusState.Initial)
+            this.wallet = wallet;
+            this.store = store;
+        }
+
+        public Block CreateBlock()
+        {
+            if (Block is null)
             {
-                TransactionHashes = null;
-                Signatures = new byte[Validators.Length][];
+                Block = MakeHeader();
+                if (Block == null) return null;
+                Contract contract = Contract.CreateMultiSigContract(this.M(), Validators);
+                ContractParametersContext sc = new ContractParametersContext(Block);
+                for (int i = 0, j = 0; i < Validators.Length && j < this.M(); i++)
+                {
+                    if (CommitPayloads[i]?.ConsensusMessage.ViewNumber != ViewNumber) continue;
+                    sc.AddSignature(contract, Validators[i], CommitPayloads[i].GetDeserializedMessage<Commit>().Signature);
+                    j++;
+                }
+                Block.Witness = sc.GetWitnesses()[0];
+                Block.Transactions = TransactionHashes.Select(p => Transactions[p]).ToArray();
             }
-            _header = null;
+            return Block;
+        }
+
+        public void Deserialize(BinaryReader reader)
+        {
+            Reset(0);
+            if (reader.ReadUInt32() != Version) throw new FormatException();
+            if (reader.ReadUInt32() != BlockIndex) throw new InvalidOperationException();
+            ViewNumber = reader.ReadByte();
+            PrimaryIndex = reader.ReadUInt32();
+            Timestamp = reader.ReadUInt32();
+            Nonce = reader.ReadUInt64();
+            NextConsensus = reader.ReadSerializable<UInt160>();
+            if (NextConsensus.Equals(UInt160.Zero))
+                NextConsensus = null;
+            TransactionHashes = reader.ReadSerializableArray<UInt256>();
+            if (TransactionHashes.Length == 0)
+                TransactionHashes = null;
+            Transaction[] transactions = new Transaction[reader.ReadVarInt(Block.MaxTransactionsPerBlock)];
+            if (transactions.Length == 0)
+            {
+                Transactions = null;
+            }
+            else
+            {
+                for (int i = 0; i < transactions.Length; i++)
+                    transactions[i] = Transaction.DeserializeFrom(reader);
+                Transactions = transactions.ToDictionary(p => p.Hash);
+            }
+            PreparationPayloads = new ConsensusPayload[reader.ReadVarInt(Blockchain.MaxValidators)];
+            for (int i = 0; i < PreparationPayloads.Length; i++)
+                PreparationPayloads[i] = reader.ReadBoolean() ? reader.ReadSerializable<ConsensusPayload>() : null;
+            CommitPayloads = new ConsensusPayload[reader.ReadVarInt(Blockchain.MaxValidators)];
+            for (int i = 0; i < CommitPayloads.Length; i++)
+                CommitPayloads[i] = reader.ReadBoolean() ? reader.ReadSerializable<ConsensusPayload>() : null;
+            ChangeViewPayloads = new ConsensusPayload[reader.ReadVarInt(Blockchain.MaxValidators)];
+            for (int i = 0; i < ChangeViewPayloads.Length; i++)
+                ChangeViewPayloads[i] = reader.ReadBoolean() ? reader.ReadSerializable<ConsensusPayload>() : null;
+            LastChangeViewPayloads = new ConsensusPayload[reader.ReadVarInt(Blockchain.MaxValidators)];
+            for (int i = 0; i < LastChangeViewPayloads.Length; i++)
+                LastChangeViewPayloads[i] = reader.ReadBoolean() ? reader.ReadSerializable<ConsensusPayload>() : null;
+        }
+
+        public void Dispose()
+        {
+            Snapshot?.Dispose();
+        }
+
+        public bool Load()
+        {
+            byte[] data = store.Get(CN_Context, new byte[0]);
+            if (data is null || data.Length == 0) return false;
+            using (MemoryStream ms = new MemoryStream(data, false))
+            using (BinaryReader reader = new BinaryReader(ms))
+            {
+                try
+                {
+                    Deserialize(reader);
+                }
+                catch
+                {
+                    return false;
+                }
+                return true;
+            }
         }
 
         public ConsensusPayload MakeChangeView()
         {
-            return MakePayload(new ChangeView
+            return ChangeViewPayloads[MyIndex] = MakeSignedPayload(new ChangeView
             {
-                NewViewNumber = ExpectedView[MyIndex]
+                Timestamp = TimeProvider.Current.UtcNow.ToTimestamp()
             });
+        }
+
+        public ConsensusPayload MakeCommit()
+        {
+            return CommitPayloads[MyIndex] ?? (CommitPayloads[MyIndex] = MakeSignedPayload(new Commit
+            {
+                Signature = MakeHeader()?.Sign(keyPair)
+            }));
         }
 
         private Block _header = null;
@@ -73,64 +175,233 @@ namespace Cam.Consensus
             return _header;
         }
 
-        private ConsensusPayload MakePayload(ConsensusMessage message)
+        private ConsensusPayload MakeSignedPayload(ConsensusMessage message)
         {
             message.ViewNumber = ViewNumber;
-            return new ConsensusPayload
+            ConsensusPayload payload = new ConsensusPayload
             {
                 Version = Version,
                 PrevHash = PrevHash,
                 BlockIndex = BlockIndex,
                 ValidatorIndex = (ushort)MyIndex,
-                Timestamp = Timestamp,
-                Data = message.ToArray()
+                ConsensusMessage = message
             };
+            SignPayload(payload);
+            return payload;
+        }
+
+        private void SignPayload(ConsensusPayload payload)
+        {
+            ContractParametersContext sc;
+            try
+            {
+                sc = new ContractParametersContext(payload);
+                wallet.Sign(sc);
+            }
+            catch (InvalidOperationException)
+            {
+                return;
+            }
+            payload.Witness = sc.GetWitnesses()[0];
         }
 
         public ConsensusPayload MakePrepareRequest()
         {
-            return MakePayload(new PrepareRequest
+            Fill();
+            return PreparationPayloads[MyIndex] = MakeSignedPayload(new PrepareRequest
             {
+                Timestamp = Timestamp,
                 Nonce = Nonce,
                 NextConsensus = NextConsensus,
                 TransactionHashes = TransactionHashes,
-                MinerTransaction = (MinerTransaction)Transactions[TransactionHashes[0]],
-                Signature = Signatures[MyIndex]
+                MinerTransaction = (MinerTransaction)Transactions[TransactionHashes[0]]
             });
         }
 
-        public ConsensusPayload MakePrepareResponse(byte[] signature)
+        public ConsensusPayload MakeRecoveryRequest()
         {
-            return MakePayload(new PrepareResponse
+            return MakeSignedPayload(new RecoveryRequest
             {
-                Signature = signature
+                Timestamp = TimeProvider.Current.UtcNow.ToTimestamp()
             });
         }
 
-        public void Reset(Wallet wallet)
+        public ConsensusPayload MakeRecoveryMessage()
         {
-            State = ConsensusState.Initial;
-            PrevHash = Blockchain.Default.CurrentBlockHash;
-            BlockIndex = Blockchain.Default.Height + 1;
-            ViewNumber = 0;
-            Validators = Blockchain.Default.GetValidators();
-            MyIndex = -1;
-            PrimaryIndex = BlockIndex % (uint)Validators.Length;
-            TransactionHashes = null;
-            Signatures = new byte[Validators.Length][];
-            ExpectedView = new byte[Validators.Length];
-            KeyPair = null;
-            for (int i = 0; i < Validators.Length; i++)
+            PrepareRequest prepareRequestMessage = null;
+            if (TransactionHashes != null)
             {
-                WalletAccount account = wallet.GetAccount(Validators[i]);
-                if (account?.HasKey == true)
+                prepareRequestMessage = new PrepareRequest
                 {
+                    ViewNumber = ViewNumber,
+                    TransactionHashes = TransactionHashes,
+                    Nonce = Nonce,
+                    NextConsensus = NextConsensus,
+                    MinerTransaction = (MinerTransaction)Transactions[TransactionHashes[0]],
+                    Timestamp = Timestamp
+                };
+            }
+            return MakeSignedPayload(new RecoveryMessage()
+            {
+                ChangeViewMessages = LastChangeViewPayloads.Where(p => p != null).Select(p => RecoveryMessage.ChangeViewPayloadCompact.FromPayload(p)).Take(this.M()).ToDictionary(p => (int)p.ValidatorIndex),
+                PrepareRequestMessage = prepareRequestMessage,
+                // We only need a PreparationHash set if we don't have the PrepareRequest information.
+                PreparationHash = TransactionHashes == null ? PreparationPayloads.Where(p => p != null).GroupBy(p => p.GetDeserializedMessage<PrepareResponse>().PreparationHash, (k, g) => new { Hash = k, Count = g.Count() }).OrderByDescending(p => p.Count).Select(p => p.Hash).FirstOrDefault() : null,
+                PreparationMessages = PreparationPayloads.Where(p => p != null).Select(p => RecoveryMessage.PreparationPayloadCompact.FromPayload(p)).ToDictionary(p => (int)p.ValidatorIndex),
+                CommitMessages = this.CommitSent()
+                    ? CommitPayloads.Where(p => p != null).Select(p => RecoveryMessage.CommitPayloadCompact.FromPayload(p)).ToDictionary(p => (int)p.ValidatorIndex)
+                    : new Dictionary<int, RecoveryMessage.CommitPayloadCompact>()
+            });
+        }
+
+        public ConsensusPayload MakePrepareResponse()
+        {
+            return PreparationPayloads[MyIndex] = MakeSignedPayload(new PrepareResponse
+            {
+                PreparationHash = PreparationPayloads[PrimaryIndex].Hash
+            });
+        }
+
+        public void Reset(byte viewNumber)
+        {
+            if (viewNumber == 0)
+            {
+                Block = null;
+                Snapshot?.Dispose();
+                Snapshot = Blockchain.Singleton.GetSnapshot();
+                PrevHash = Snapshot.CurrentBlockHash;
+                BlockIndex = Snapshot.Height + 1;
+                Validators = Snapshot.GetValidators();
+                MyIndex = -1;
+                ChangeViewPayloads = new ConsensusPayload[Validators.Length];
+                LastChangeViewPayloads = new ConsensusPayload[Validators.Length];
+                CommitPayloads = new ConsensusPayload[Validators.Length];
+                if (LastSeenMessage == null)
+                {
+                    LastSeenMessage = new int[Validators.Length];
+                    for (int i = 0; i < Validators.Length; i++)
+                        LastSeenMessage[i] = -1;
+                }
+                keyPair = null;
+                for (int i = 0; i < Validators.Length; i++)
+                {
+                    WalletAccount account = wallet?.GetAccount(Validators[i]);
+                    if (account?.HasKey != true) continue;
                     MyIndex = i;
-                    KeyPair = account.GetKey();
+                    keyPair = account.GetKey();
                     break;
                 }
             }
+            else
+            {
+                for (int i = 0; i < LastChangeViewPayloads.Length; i++)
+                    if (ChangeViewPayloads[i]?.GetDeserializedMessage<ChangeView>().NewViewNumber >= viewNumber)
+                        LastChangeViewPayloads[i] = ChangeViewPayloads[i];
+                    else
+                        LastChangeViewPayloads[i] = null;
+            }
+            ViewNumber = viewNumber;
+            PrimaryIndex = this.GetPrimaryIndex(viewNumber);
+            Timestamp = 0;
+            TransactionHashes = null;
+            PreparationPayloads = new ConsensusPayload[Validators.Length];
+            if (MyIndex >= 0) LastSeenMessage[MyIndex] = (int) BlockIndex;
             _header = null;
+        }
+
+        public void Save()
+        {
+            store.PutSync(CN_Context, new byte[0], this.ToArray());
+        }
+
+        public void Serialize(BinaryWriter writer)
+        {
+            writer.Write(Version);
+            writer.Write(BlockIndex);
+            writer.Write(ViewNumber);
+            writer.Write(PrimaryIndex);
+            writer.Write(Timestamp);
+            writer.Write(Nonce);
+            writer.Write(NextConsensus ?? UInt160.Zero);
+            writer.Write(TransactionHashes ?? new UInt256[0]);
+            writer.Write(Transactions?.Values.ToArray() ?? new Transaction[0]);
+            writer.WriteVarInt(PreparationPayloads.Length);
+            foreach (var payload in PreparationPayloads)
+            {
+                bool hasPayload = !(payload is null);
+                writer.Write(hasPayload);
+                if (!hasPayload) continue;
+                writer.Write(payload);
+            }
+            writer.WriteVarInt(CommitPayloads.Length);
+            foreach (var payload in CommitPayloads)
+            {
+                bool hasPayload = !(payload is null);
+                writer.Write(hasPayload);
+                if (!hasPayload) continue;
+                writer.Write(payload);
+            }
+            writer.WriteVarInt(ChangeViewPayloads.Length);
+            foreach (var payload in ChangeViewPayloads)
+            {
+                bool hasPayload = !(payload is null);
+                writer.Write(hasPayload);
+                if (!hasPayload) continue;
+                writer.Write(payload);
+            }
+            writer.WriteVarInt(LastChangeViewPayloads.Length);
+            foreach (var payload in LastChangeViewPayloads)
+            {
+                bool hasPayload = !(payload is null);
+                writer.Write(hasPayload);
+                if (!hasPayload) continue;
+                writer.Write(payload);
+            }
+        }
+
+        private void Fill()
+        {
+            IEnumerable<Transaction> memoryPoolTransactions = Blockchain.Singleton.MemPool.GetSortedVerifiedTransactions();
+            foreach (IPolicyPlugin plugin in Plugin.Policies)
+                memoryPoolTransactions = plugin.FilterForBlock(memoryPoolTransactions);
+            List<Transaction> transactions = memoryPoolTransactions.ToList();
+            Fixed8 amountNetFee = Block.CalculateNetFee(transactions);
+            TransactionOutput[] outputs = amountNetFee == Fixed8.Zero ? new TransactionOutput[0] : new[] { new TransactionOutput
+            {
+                AssetId = Blockchain.UtilityToken.Hash,
+                Value = amountNetFee,
+                ScriptHash = wallet.GetChangeAddress()
+            } };
+            while (true)
+            {
+                ulong nonce = GetNonce();
+                MinerTransaction tx = new MinerTransaction
+                {
+                    Nonce = (uint)(nonce % (uint.MaxValue + 1ul)),
+                    Attributes = new TransactionAttribute[0],
+                    Inputs = new CoinReference[0],
+                    Outputs = outputs,
+                    Witnesses = new Witness[0]
+                };
+                if (!Snapshot.ContainsTransaction(tx.Hash))
+                {
+                    Nonce = nonce;
+                    transactions.Insert(0, tx);
+                    break;
+                }
+            }
+            TransactionHashes = transactions.Select(p => p.Hash).ToArray();
+            Transactions = transactions.ToDictionary(p => p.Hash);
+            NextConsensus = Blockchain.GetConsensusAddress(Snapshot.GetValidators(transactions).ToArray());
+            Timestamp = Math.Max(TimeProvider.Current.UtcNow.ToTimestamp(), this.PrevHeader().Timestamp + 1);
+        }
+
+        private static ulong GetNonce()
+        {
+            byte[] nonce = new byte[sizeof(ulong)];
+            Random rand = new Random();
+            rand.NextBytes(nonce);
+            return nonce.ToUInt64(0);
         }
     }
 }

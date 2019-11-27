@@ -17,6 +17,7 @@
 [Rr]eleases/
 x64/
 x86/
+build/
 bld/
 [Bb]in/
 [Oo]bj/
@@ -183,7 +184,9 @@ _pkginfo.txt
 !*.[Cc]ache/
 
 # Others
+*.[Cc]ache
 ClientBin/
+[Ss]tyle[Cc]op.*
 ~$*
 *~
 *.dbmdl
@@ -195,7 +198,7 @@ orleans.codegen.cs
 
 # Since there are multiple workflows, uncomment next line to ignore bower_components
 # (https://github.com/github/gitignore/pull/1529#issuecomment-104372622)
-#bower_components/
+bower_components/
 
 # RIA/Silverlight projects
 Generated_Code/
@@ -250,3 +253,5 @@ paket-files/
 # JetBrains Rider
 .idea/
 *.sln.iml
+
+PublishProfiles

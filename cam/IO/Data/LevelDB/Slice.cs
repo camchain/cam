@@ -6,7 +6,7 @@ using System.Text;
 
 namespace Cam.IO.Data.LevelDB
 {
-    internal struct Slice : IComparable<Slice>, IEquatable<Slice>
+    public struct Slice : IComparable<Slice>, IEquatable<Slice>
     {
         internal byte[] buffer;
 
@@ -131,11 +131,11 @@ namespace Cam.IO.Data.LevelDB
             }
         }
 
-        unsafe public uint ToUInt32()
+        unsafe public uint ToUInt32(int index = 0)
         {
-            if (buffer.Length != sizeof(uint))
+            if (buffer.Length != sizeof(uint) + index)
                 throw new InvalidCastException();
-            fixed (byte* pbyte = &buffer[0])
+            fixed (byte* pbyte = &buffer[index])
             {
                 return *((uint*)pbyte);
             }

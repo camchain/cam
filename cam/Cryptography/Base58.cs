@@ -7,14 +7,7 @@ namespace Cam.Cryptography
 {
     public static class Base58
     {
-
-
-
         public const string Alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-
-
-
-
 
         public static byte[] Decode(string input)
         {
@@ -38,10 +31,6 @@ namespace Cam.Cryptography
             Array.Copy(bytes, stripSignByte ? 1 : 0, tmp, leadingZeros, tmp.Length - leadingZeros);
             return tmp;
         }
-
-
-
-
 
         public static string Encode(byte[] input)
         {

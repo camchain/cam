@@ -108,7 +108,7 @@ namespace Cam.Cryptography
 
             for (var i = 0; i < 8; i += 2)
             {
-
+                //((x0 + x12) << 7) | ((x0 + x12) >> (32 - 7));
                 /* Operate on columns. */
                 x4 ^= R(x0 + x12, 7); x8 ^= R(x4 + x0, 9);
                 x12 ^= R(x8 + x4, 13); x0 ^= R(x12 + x8, 18);
@@ -245,11 +245,12 @@ namespace Cam.Cryptography
             }
         }
 
-
-
-
-
-
+#if NET47
+        public static byte[] DeriveKey(byte[] password, byte[] salt, int N, int r, int p, int derivedKeyLength)
+        {
+            return Replicon.Cryptography.SCrypt.SCrypt.DeriveKey(password, salt, (ulong)N, (uint)r, (uint)p, (uint)derivedKeyLength);
+        }
+#else
         public unsafe static byte[] DeriveKey(byte[] password, byte[] salt, int N, int r, int p, int derivedKeyLength)
         {
             var Ba = new byte[128 * r * p + 63];
@@ -279,7 +280,7 @@ namespace Cam.Cryptography
 
             return buf;
         }
-
+#endif
 
         private static void PBKDF2_SHA256(HMACSHA256 mac, byte[] password, byte[] salt, int saltLength, long iterationCount, byte[] derivedKey, int derivedKeyLength)
         {

@@ -1,7 +1,4 @@
-﻿using Cam.Core;
-using System;
-using System.Collections.Generic;
-using System.Text;
+﻿using Cam.Network.P2P.Payloads;
 
 namespace Cam.UnitTests
 {

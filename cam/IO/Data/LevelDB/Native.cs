@@ -4,13 +4,13 @@ using System.Runtime.InteropServices;
 
 namespace Cam.IO.Data.LevelDB
 {
-    internal enum CompressionType : byte
+    public enum CompressionType : byte
     {
         kNoCompression = 0x0,
         kSnappyCompression = 0x1
     }
 
-    internal static class Native
+    public static class Native
     {
 #if NET47
         static Native()
@@ -50,7 +50,8 @@ namespace Cam.IO.Data.LevelDB
         [DllImport("libleveldb", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
         public static extern IntPtr leveldb_get(IntPtr /* DB */ db, IntPtr /* ReadOptions*/ options, byte[] key, UIntPtr keylen, out UIntPtr vallen, out IntPtr errptr);
 
-
+        //[DllImport("libleveldb", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        //static extern void leveldb_approximate_sizes(IntPtr /* DB */ db, int num_ranges, byte[] range_start_key, long range_start_key_len, byte[] range_limit_key, long range_limit_key_len, out long sizes);
 
         [DllImport("libleveldb", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
         public static extern IntPtr leveldb_create_iterator(IntPtr /* DB */ db, IntPtr /* ReadOption */ options);

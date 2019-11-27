@@ -5,27 +5,17 @@ using System.Security.Cryptography;
 
 namespace Cam.Cryptography.ECC
 {
-
-
-
     public class ECDsa
     {
         private readonly byte[] privateKey;
         private readonly ECPoint publicKey;
         private readonly ECCurve curve;
 
-
-
-
-
         public ECDsa(byte[] privateKey, ECCurve curve)
             : this(curve.G * privateKey)
         {
             this.privateKey = privateKey;
         }
-
-
-
 
         public ECDsa(ECPoint publicKey)
         {
@@ -43,10 +33,6 @@ namespace Cam.Cryptography.ECC
             }
             return trunc;
         }
-
-
-
-
 
         public BigInteger[] GenerateSignature(byte[] message)
         {
@@ -105,12 +91,6 @@ namespace Cam.Cryptography.ECC
             }
             return R;
         }
-
-
-
-
-
-
 
         public bool VerifySignature(byte[] message, BigInteger r, BigInteger s)
         {

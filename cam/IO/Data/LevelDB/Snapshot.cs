@@ -2,7 +2,7 @@
 
 namespace Cam.IO.Data.LevelDB
 {
-    internal class Snapshot : IDisposable
+    public class Snapshot : IDisposable
     {
         internal IntPtr db, handle;
 

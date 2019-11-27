@@ -2,7 +2,7 @@
 
 namespace Cam.IO.Data.LevelDB
 {
-    internal class WriteBatch
+    public class WriteBatch
     {
         internal readonly IntPtr handle = Native.leveldb_writebatch_create();
 

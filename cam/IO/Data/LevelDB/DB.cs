@@ -2,9 +2,14 @@
 
 namespace Cam.IO.Data.LevelDB
 {
-    internal class DB : IDisposable
+    public class DB : IDisposable
     {
         private IntPtr handle;
+
+        /// <summary>
+        /// Return true if haven't got valid handle
+        /// </summary>
+        public bool IsDisposed => handle == IntPtr.Zero;
 
         private DB(IntPtr handle)
         {
@@ -98,10 +103,10 @@ namespace Cam.IO.Data.LevelDB
 
         public void Write(WriteOptions options, WriteBatch write_batch)
         {
-
-
-
-
+            // There's a bug in .Net Core.
+            // When calling DB.Write(), it will throw LevelDBException sometimes.
+            // But when you try to catch the exception, the bug disappears.
+            // We shall remove the "try...catch" clause when Microsoft fix the bug.
             byte retry = 0;
             while (true)
             {

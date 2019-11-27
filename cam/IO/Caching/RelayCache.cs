@@ -1,4 +1,4 @@
-﻿using Cam.Network;
+﻿using Cam.Network.P2P.Payloads;
 
 namespace Cam.IO.Caching
 {

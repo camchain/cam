@@ -12,8 +12,6 @@ namespace Cam.Cryptography.ECC
         internal ECFieldElement X, Y;
         internal readonly ECCurve Curve;
 
-
-
         public bool IsInfinity
         {
             get { return X == null && Y == null; }
@@ -35,10 +33,6 @@ namespace Cam.Cryptography.ECC
             this.Curve = curve;
         }
 
-
-
-
-
         public int CompareTo(ECPoint other)
         {
             if (ReferenceEquals(this, other)) return 0;
@@ -46,11 +40,6 @@ namespace Cam.Cryptography.ECC
             if (result != 0) return result;
             return Y.CompareTo(other.Y);
         }
-
-
-
-
-
 
         public static ECPoint DecodePoint(byte[] encoded, ECCurve curve)
         {
@@ -98,9 +87,10 @@ namespace Cam.Cryptography.ECC
             ECFieldElement alpha = x * (x.Square() + curve.A) + curve.B;
             ECFieldElement beta = alpha.Sqrt();
 
-
-
-
+            //
+            // if we can't find a sqrt we haven't got a point on the
+            // curve - run!
+            //
             if (beta == null)
                 throw new ArithmeticException("Invalid point compression");
 
@@ -109,7 +99,7 @@ namespace Cam.Cryptography.ECC
 
             if (bit0 != yTilde)
             {
-
+                // Use the other root
                 beta = new ECFieldElement(curve.Q - betaValue, curve);
             }
 
@@ -123,11 +113,6 @@ namespace Cam.Cryptography.ECC
             Y = p.Y;
         }
 
-
-
-
-
-
         public static ECPoint DeserializeFrom(BinaryReader reader, ECCurve curve)
         {
             int expectedLength = (curve.Q.GetBitLength() + 7) / 8;
@@ -139,21 +124,27 @@ namespace Cam.Cryptography.ECC
                     return curve.Infinity;
                 case 0x02:
                 case 0x03:
-                    reader.Read(buffer, 1, expectedLength);
-                    return DecodePoint(buffer.Take(1 + expectedLength).ToArray(), curve);
+                    {
+                        if (reader.Read(buffer, 1, expectedLength) != expectedLength)
+                        {
+                            throw new FormatException();
+                        }
+                        return DecodePoint(buffer.Take(1 + expectedLength).ToArray(), curve);
+                    }
                 case 0x04:
                 case 0x06:
                 case 0x07:
-                    reader.Read(buffer, 1, expectedLength * 2);
-                    return DecodePoint(buffer, curve);
+                    {
+                        if (reader.Read(buffer, 1, expectedLength * 2) != expectedLength * 2)
+                        {
+                            throw new FormatException();
+                        }
+                        return DecodePoint(buffer, curve);
+                    }
                 default:
                     throw new FormatException("Invalid point encoding " + buffer[0]);
             }
         }
-
-
-
-
 
         public byte[] EncodePoint(bool commpressed)
         {
@@ -175,10 +166,6 @@ namespace Cam.Cryptography.ECC
             return data;
         }
 
-
-
-
-
         public bool Equals(ECPoint other)
         {
             if (ReferenceEquals(this, other)) return true;
@@ -188,19 +175,10 @@ namespace Cam.Cryptography.ECC
             return X.Equals(other.X) && Y.Equals(other.Y);
         }
 
-
-
-
-
         public override bool Equals(object obj)
         {
             return Equals(obj as ECPoint);
         }
-
-
-
-
-
 
         public static ECPoint FromBytes(byte[] pubkey, ECCurve curve)
         {
@@ -220,9 +198,6 @@ namespace Cam.Cryptography.ECC
             }
         }
 
-
-
-
         public override int GetHashCode()
         {
             return X.GetHashCode() + Y.GetHashCode();
@@ -230,14 +205,17 @@ namespace Cam.Cryptography.ECC
 
         internal static ECPoint Multiply(ECPoint p, BigInteger k)
         {
-
+            // floor(log2(k))
             int m = k.GetBitLength();
 
+            // width of the Window NAF
             sbyte width;
 
+            // Required length of precomputation array
             int reqPreCompLen;
 
-
+            // Determine optimal width and corresponding length of precomputation
+            // array based on literature values
             if (m < 13)
             {
                 width = 2;
@@ -274,6 +252,7 @@ namespace Cam.Cryptography.ECC
                 reqPreCompLen = 127;
             }
 
+            // The length of the precomputation array
             int preCompLen = 1;
 
             ECPoint[] preComp = preComp = new ECPoint[] { p };
@@ -281,24 +260,26 @@ namespace Cam.Cryptography.ECC
 
             if (preCompLen < reqPreCompLen)
             {
-
-
+                // Precomputation array must be made bigger, copy existing preComp
+                // array into the larger new preComp array
                 ECPoint[] oldPreComp = preComp;
                 preComp = new ECPoint[reqPreCompLen];
                 Array.Copy(oldPreComp, 0, preComp, 0, preCompLen);
 
                 for (int i = preCompLen; i < reqPreCompLen; i++)
                 {
-
-
-
+                    // Compute the new ECPoints for the precomputation array.
+                    // The values 1, 3, 5, ..., 2^(width-1)-1 times p are
+                    // computed
                     preComp[i] = twiceP + preComp[i - 1];
                 }
             }
 
+            // Compute the Window NAF of the desired width
             sbyte[] wnaf = WindowNaf(width, k);
             int l = wnaf.Length;
 
+            // Apply the Window NAF to p using the precomputed ECPoint values.
             ECPoint q = p.Curve.Infinity;
             for (int i = l - 1; i >= 0; i--)
             {
@@ -312,7 +293,7 @@ namespace Cam.Cryptography.ECC
                     }
                     else
                     {
-
+                        // wnaf[i] < 0
                         q -= preComp[(-wnaf[i] - 1) / 2];
                     }
                 }
@@ -412,7 +393,6 @@ namespace Cam.Cryptography.ECC
                 throw new ArgumentException();
             if (p.IsInfinity)
                 return p;
-
             BigInteger k = new BigInteger(n.Reverse().Concat(new byte[1]).ToArray());
             if (k.Sign == 0)
                 return p.Curve.Infinity;

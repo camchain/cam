@@ -1,7 +1,7 @@
 ﻿using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using Cam.Core;
 using Cam.IO.Json;
+using Cam.Network.P2P.Payloads;
 
 namespace Cam.UnitTests
 {

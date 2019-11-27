@@ -5,13 +5,13 @@ using System.IO;
 
 namespace Cam
 {
-
-
-
-
+    /// <summary>
+    /// Accurate to 10^-8 64-bit fixed-point numbers minimize rounding errors.
+    /// By controlling the accuracy of the multiplier, rounding errors can be completely eliminated.
+    /// </summary>
     public struct Fixed8 : IComparable<Fixed8>, IEquatable<Fixed8>, IFormattable, ISerializable
     {
-        private const long D = 100000000;
+        private const long D = 100_000_000;
         internal long value;
 
         public static readonly Fixed8 MaxValue = new Fixed8 { value = long.MaxValue };
@@ -204,7 +204,7 @@ namespace Cam
         public static Fixed8 operator *(Fixed8 x, Fixed8 y)
         {
             const ulong QUO = (1ul << 63) / (D >> 1);
-            const ulong REM = (1ul << 63) % (D >> 1);
+            const ulong REM = ((1ul << 63) % (D >> 1)) << 1;
             int sign = Math.Sign(x.value) * Math.Sign(y.value);
             ulong ux = (ulong)Math.Abs(x.value);
             ulong uy = (ulong)Math.Abs(y.value);
@@ -223,14 +223,17 @@ namespace Cam
                 ++rh;
             if (rh >= D)
                 throw new OverflowException();
-            ulong r = rh * QUO + (rh * REM + rl) / D;
+            ulong rd = rh * REM + rl;
+            if (rd < rl)
+                ++rh;
+            ulong r = rh * QUO + rd / D;
             x.value = (long)r * sign;
             return x;
         }
 
         public static Fixed8 operator *(Fixed8 x, long y)
         {
-            x.value *= y;
+            x.value = checked(x.value * y);
             return x;
         }
 

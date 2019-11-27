@@ -1,292 +1,63 @@
-﻿using Cam.Core;
-using Cam.Cryptography.ECC;
-using Cam.IO.Caching;
+using Cam.Ledger;
+using Cam.Network.P2P.Payloads;
+using Cam.Persistence;
 using Cam.VM;
-using System.Numerics;
-using System.Text;
+using Cam.VM.Types;
 
 namespace Cam.SmartContract
 {
     public class ApplicationEngine : ExecutionEngine
     {
-        #region Limits
-
-
-
-        private const int MaxSizeForBigInteger = 32;
-
-
-
-        private const uint MaxStackSize = 2 * 1024;
-
-
-
-        private const uint MaxItemSize = 1024 * 1024;
-
-
-
-        private const uint MaxInvocationStackSize = 1024;
-
-
-
-        private const uint MaxArraySize = 1024;
-        #endregion
-
         private const long ratio = 100000;
         private const long gas_free = 10 * 100000000;
         private readonly long gas_amount;
         private long gas_consumed = 0;
         private readonly bool testMode;
+        private readonly Snapshot snapshot;
 
-        private readonly CachedScriptTable script_table;
-
-        public TriggerType Trigger { get; }
         public Fixed8 GasConsumed => new Fixed8(gas_consumed);
+        public new CamService Service => (CamService)base.Service;
 
-        public ApplicationEngine(TriggerType trigger, IScriptContainer container, IScriptTable scriptTable, IBlock table, InteropService service, Fixed8 gas, bool testMode = false)
-    : base(container, Cryptography.Crypto.Default,scriptTable, table, service)
+        public ApplicationEngine(TriggerType trigger, IScriptContainer container, Snapshot snapshot, Fixed8 gas, bool testMode = false)
+            : base(container, Cryptography.Crypto.Default, snapshot, new CamService(trigger, snapshot))
         {
             this.gas_amount = gas_free + gas.GetData();
             this.testMode = testMode;
-            this.Trigger = trigger;
-            if (scriptTable is CachedScriptTable)
-            {
-                this.script_table = (CachedScriptTable)scriptTable;
-            }
+            this.snapshot = snapshot;
         }
 
-        private bool CheckArraySize(OpCode nextInstruction)
+        private bool CheckDynamicInvoke()
         {
-            switch (nextInstruction)
+            Instruction instruction = CurrentContext.CurrentInstruction;
+            switch (instruction.OpCode)
             {
-                case OpCode.PACK:
-                case OpCode.NEWARRAY:
-                case OpCode.NEWSTRUCT:
-                    {
-                        if (EvaluationStack.Count == 0) return false;
-                        int size = (int)EvaluationStack.Peek().GetBigInteger();
-                        if (size > MaxArraySize) return false;
-                        return true;
-                    }
-                default:
-                    return true;
-            }
-        }
-
-        private bool CheckInvocationStack(OpCode nextInstruction)
-        {
-            switch (nextInstruction)
-            {
-                case OpCode.CALL:
                 case OpCode.APPCALL:
-                    if (InvocationStack.Count >= MaxInvocationStackSize) return false;
-                    return true;
+                case OpCode.TAILCALL:
+                    if (instruction.Operand.NotZero()) return true;
+                    // if we get this far it is a dynamic call
+                    // now look at the current executing script
+                    // to determine if it can do dynamic calls
+                    return snapshot.Contracts[new UInt160(CurrentContext.ScriptHash)].HasDynamicInvoke;
+                case OpCode.CALL_ED:
+                case OpCode.CALL_EDT:
+                    return snapshot.Contracts[new UInt160(CurrentContext.ScriptHash)].HasDynamicInvoke;
                 default:
                     return true;
             }
         }
 
-        private bool CheckItemSize(OpCode nextInstruction)
+        public override void Dispose()
         {
-            switch (nextInstruction)
-            {
-                case OpCode.PUSHDATA4:
-                    {
-                        if (CurrentContext.InstructionPointer + 4 >= CurrentContext.Script.Length)
-                            return false;
-                        uint length = CurrentContext.Script.ToUInt32(CurrentContext.InstructionPointer + 1);
-                        if (length > MaxItemSize) return false;
-                        return true;
-                    }
-                case OpCode.CAT:
-                    {
-                        if (EvaluationStack.Count < 2) return false;
-                        int length = EvaluationStack.Peek(0).GetByteArray().Length + EvaluationStack.Peek(1).GetByteArray().Length;
-                        if (length > MaxItemSize) return false;
-                        return true;
-                    }
-                default:
-                    return true;
-            }
+            base.Dispose();
+            Service.Dispose();
         }
 
-
-
-
-
-        private bool CheckBigInteger(BigInteger value)
+        protected virtual long GetPrice()
         {
-            return value == null ? false :
-                value.ToByteArray().Length <= MaxSizeForBigInteger;
-        }
-
-
-
-        private bool CheckBigIntegers(OpCode nextInstruction)
-        {
-            switch (nextInstruction)
+            Instruction instruction = CurrentContext.CurrentInstruction;
+            if (instruction.OpCode <= OpCode.NOP) return 0;
+            switch (instruction.OpCode)
             {
-                case OpCode.INC:
-                    {
-                        BigInteger x = EvaluationStack.Peek().GetBigInteger();
-
-                        if (!CheckBigInteger(x) || !CheckBigInteger(x + 1))
-                            return false;
-
-                        break;
-                    }
-                case OpCode.DEC:
-                    {
-                        BigInteger x = EvaluationStack.Peek().GetBigInteger();
-
-                        if (!CheckBigInteger(x) || (x.Sign <= 0 && !CheckBigInteger(x - 1)))
-                            return false;
-
-                        break;
-                    }
-                case OpCode.ADD:
-                    {
-                        BigInteger x2 = EvaluationStack.Peek().GetBigInteger();
-                        BigInteger x1 = EvaluationStack.Peek(1).GetBigInteger();
-
-                        if (!CheckBigInteger(x2) || !CheckBigInteger(x1) || !CheckBigInteger(x1 + x2))
-                            return false;
-
-                        break;
-                    }
-                case OpCode.SUB:
-                    {
-                        BigInteger x2 = EvaluationStack.Peek().GetBigInteger();
-                        BigInteger x1 = EvaluationStack.Peek(1).GetBigInteger();
-
-                        if (!CheckBigInteger(x2) || !CheckBigInteger(x1) || !CheckBigInteger(x1 - x2))
-                            return false;
-
-                        break;
-                    }
-                case OpCode.MUL:
-                    {
-                        BigInteger x2 = EvaluationStack.Peek().GetBigInteger();
-                        BigInteger x1 = EvaluationStack.Peek(1).GetBigInteger();
-
-                        int lx1 = x1 == null ? 0 : x1.ToByteArray().Length;
-
-                        if (lx1 > MaxSizeForBigInteger)
-                            return false;
-
-                        int lx2 = x2 == null ? 0 : x2.ToByteArray().Length;
-
-                        if ((lx1 + lx2) > MaxSizeForBigInteger)
-                            return false;
-
-                        break;
-                    }
-                case OpCode.DIV:
-                    {
-                        BigInteger x2 = EvaluationStack.Peek().GetBigInteger();
-                        BigInteger x1 = EvaluationStack.Peek(1).GetBigInteger();
-
-                        if (!CheckBigInteger(x2) || !CheckBigInteger(x1))
-                            return false;
-
-                        break;
-                    }
-                case OpCode.MOD:
-                    {
-                        BigInteger x2 = EvaluationStack.Peek().GetBigInteger();
-                        BigInteger x1 = EvaluationStack.Peek(1).GetBigInteger();
-
-                        if (!CheckBigInteger(x2) || !CheckBigInteger(x1))
-                            return false;
-
-                        break;
-                    }
-            }
-
-            return true;
-        }
-
-        private bool CheckStackSize(OpCode nextInstruction)
-        {
-            int size = 0;
-            if (nextInstruction <= OpCode.PUSH16)
-                size = 1;
-            else
-                switch (nextInstruction)
-                {
-                    case OpCode.DEPTH:
-                    case OpCode.DUP:
-                    case OpCode.OVER:
-                    case OpCode.TUCK:
-                        size = 1;
-                        break;
-                    case OpCode.UNPACK:
-                        StackItem item = EvaluationStack.Peek();
-                        if (!item.IsArray) return false;
-                        size = item.GetArray().Count;
-                        break;
-                }
-            if (size == 0) return true;
-            size += EvaluationStack.Count + AltStack.Count;
-            if (size > MaxStackSize) return false;
-            return true;
-        }
-
-        private bool CheckDynamicInvoke(OpCode nextInstruction)
-        {
-            if (nextInstruction == OpCode.APPCALL || nextInstruction == OpCode.TAILCALL)
-            {
-                for (int i = CurrentContext.InstructionPointer + 1; i < CurrentContext.InstructionPointer + 21; i++)
-                {
-                    if (CurrentContext.Script[i] != 0) return true;
-                }
-
-
-
-                ContractState contract = script_table.GetContractState(CurrentContext.ScriptHash);
-                return contract.HasDynamicInvoke;
-            }
-            return true;
-        }
-
-        public new bool Execute()
-        {
-            try
-            {
-                while (!State.HasFlag(VMState.HALT) && !State.HasFlag(VMState.FAULT))
-                {
-                    if (CurrentContext.InstructionPointer < CurrentContext.Script.Length)
-                    {
-                        OpCode nextOpcode = CurrentContext.NextInstruction;
-
-                        gas_consumed = checked(gas_consumed + GetPrice(nextOpcode) * ratio);
-                        if (!testMode && gas_consumed > gas_amount) return false;
-
-                        if (!CheckItemSize(nextOpcode)) return false;
-                        if (!CheckStackSize(nextOpcode)) return false;
-                        if (!CheckArraySize(nextOpcode)) return false;
-                        if (!CheckInvocationStack(nextOpcode)) return false;
-                        if (!CheckBigIntegers(nextOpcode)) return false;
-                        if (!CheckDynamicInvoke(nextOpcode)) return false;
-                    }
-
-                    StepInto();
-                }
-            }
-            catch
-            {
-                return false;
-            }
-            return !State.HasFlag(VMState.FAULT);
-        }
-
-        protected virtual long GetPrice(OpCode nextInstruction)
-        {
-            if (nextInstruction <= OpCode.PUSH16) return 0;
-            switch (nextInstruction)
-            {
-                case OpCode.NOP:
-                    return 0;
                 case OpCode.APPCALL:
                 case OpCode.TAILCALL:
                     return 10;
@@ -299,11 +70,18 @@ namespace Cam.SmartContract
                 case OpCode.HASH256:
                     return 20;
                 case OpCode.CHECKSIG:
+                case OpCode.VERIFY:
                     return 100;
                 case OpCode.CHECKMULTISIG:
                     {
-                        if (EvaluationStack.Count == 0) return 1;
-                        int n = (int)EvaluationStack.Peek().GetBigInteger();
+                        if (CurrentContext.EvaluationStack.Count == 0) return 1;
+
+                        var item = CurrentContext.EvaluationStack.Peek();
+
+                        int n;
+                        if (item is Array array) n = array.Count;
+                        else n = (int)item.GetBigInteger();
+
                         if (n < 1) return 1;
                         return 100 * n;
                     }
@@ -313,122 +91,86 @@ namespace Cam.SmartContract
 
         protected virtual long GetPriceForSysCall()
         {
-            if (CurrentContext.InstructionPointer >= CurrentContext.Script.Length - 3)
-                return 1;
-            byte length = CurrentContext.Script[CurrentContext.InstructionPointer + 1];
-            if (CurrentContext.InstructionPointer > CurrentContext.Script.Length - length - 2)
-                return 1;
-            string api_name = Encoding.ASCII.GetString(CurrentContext.Script, CurrentContext.InstructionPointer + 2, length);
-            switch (api_name)
+            Instruction instruction = CurrentContext.CurrentInstruction;
+            uint api_hash = instruction.Operand.Length == 4
+                ? instruction.TokenU32
+                : instruction.TokenString.ToInteropMethodHash();
+            long price = Service.GetPrice(api_hash);
+            if (price > 0) return price;
+            if (api_hash == "Cam.Asset.Create".ToInteropMethodHash() ||
+               api_hash == "AntShares.Asset.Create".ToInteropMethodHash())
+                return 5000L * 100000000L / ratio;
+            if (api_hash == "Cam.Asset.Renew".ToInteropMethodHash() ||
+                api_hash == "AntShares.Asset.Renew".ToInteropMethodHash())
+                return (byte)CurrentContext.EvaluationStack.Peek(1).GetBigInteger() * 5000L * 100000000L / ratio;
+            if (api_hash == "Cam.Contract.Create".ToInteropMethodHash() ||
+                api_hash == "Cam.Contract.Migrate".ToInteropMethodHash() ||
+                api_hash == "AntShares.Contract.Create".ToInteropMethodHash() ||
+                api_hash == "AntShares.Contract.Migrate".ToInteropMethodHash())
             {
-                case "Cam.Runtime.CheckWitness":
+                long fee = 100L;
 
-                    return 200;
-                case "Cam.Blockchain.GetHeader":
+                ContractPropertyState contract_properties = (ContractPropertyState)(byte)CurrentContext.EvaluationStack.Peek(3).GetBigInteger();
 
-                    return 100;
-                case "Cam.Blockchain.GetBlock":
-
-                    return 200;
-                case "Cam.Blockchain.GetTransaction":
-
-                    return 100;
-                case "Cam.Blockchain.GetAccount":
-
-                    return 100;
-                case "Cam.Blockchain.GetValidators":
-
-                    return 200;
-                case "Cam.Blockchain.GetAsset":
-
-                    return 100;
-                case "Cam.Blockchain.GetContract":
-
-                    return 100;
-                case "Cam.Transaction.GetReferences":
-
-                case "Cam.Transaction.GetUnspentCoins":
-                    return 200;
-                case "Cam.Account.SetVotes":
-
-                    return 1000;
-                case "Cam.Validator.Register":
-
-                    return 1000L * 100000000L / ratio;
-                case "Cam.Asset.Create":
-
-                    return 5000L * 100000000L / ratio;
-                case "Cam.Asset.Renew":
-
-                    return (byte)EvaluationStack.Peek(1).GetBigInteger() * 5000L * 100000000L / ratio;
-                case "Cam.Contract.Create":
-                case "Cam.Contract.Migrate":
-
-
-                    long fee = 100L;
-
-                    ContractPropertyState contract_properties = (ContractPropertyState)(byte)EvaluationStack.Peek(3).GetBigInteger();
-
-                    if (contract_properties.HasFlag(ContractPropertyState.HasStorage))
-                    {
-                        fee += 400L;
-                    }
-                    if (contract_properties.HasFlag(ContractPropertyState.HasDynamicInvoke))
-                    {
-                        fee += 500L;
-                    }
-                    return fee * 100000000L / ratio;
-                case "Cam.Storage.Get":
-
-                    return 100;
-                case "Cam.Storage.Put":
-
-                    return ((EvaluationStack.Peek(1).GetByteArray().Length + EvaluationStack.Peek(2).GetByteArray().Length - 1) / 1024 + 1) * 1000;
-                case "Cam.Storage.Delete":
-
-                    return 100;
-                default:
-                    return 1;
+                if (contract_properties.HasFlag(ContractPropertyState.HasStorage))
+                {
+                    fee += 400L;
+                }
+                if (contract_properties.HasFlag(ContractPropertyState.HasDynamicInvoke))
+                {
+                    fee += 500L;
+                }
+                return fee * 100000000L / ratio;
             }
+            if (api_hash == "System.Storage.Put".ToInteropMethodHash() ||
+                api_hash == "System.Storage.PutEx".ToInteropMethodHash() ||
+                api_hash == "Cam.Storage.Put".ToInteropMethodHash() ||
+                api_hash == "AntShares.Storage.Put".ToInteropMethodHash())
+                return ((CurrentContext.EvaluationStack.Peek(1).GetByteArray().Length + CurrentContext.EvaluationStack.Peek(2).GetByteArray().Length - 1) / 1024 + 1) * 1000;
+            return 1;
         }
 
-        public static ApplicationEngine Run(byte[] script, IScriptContainer container = null, Block persisting_block = null)
+        protected override bool PreExecuteInstruction()
         {
-            if (persisting_block == null)
-                persisting_block = new Block
+            if (CurrentContext.InstructionPointer >= CurrentContext.Script.Length)
+                return true;
+            gas_consumed = checked(gas_consumed + GetPrice() * ratio);
+            if (!testMode && gas_consumed > gas_amount) return false;
+            if (!CheckDynamicInvoke()) return false;
+            return true;
+        }
+
+        public static ApplicationEngine Run(byte[] script, Snapshot snapshot,
+            IScriptContainer container = null, Block persistingBlock = null, bool testMode = false, Fixed8 extraGAS = default(Fixed8))
+        {
+            snapshot.PersistingBlock = persistingBlock ?? snapshot.PersistingBlock ?? new Block
+            {
+                Version = 0,
+                PrevHash = snapshot.CurrentBlockHash,
+                MerkleRoot = new UInt256(),
+                Timestamp = snapshot.Blocks[snapshot.CurrentBlockHash].TrimmedBlock.Timestamp + Blockchain.SecondsPerBlock,
+                Index = snapshot.Height + 1,
+                ConsensusData = 0,
+                NextConsensus = snapshot.Blocks[snapshot.CurrentBlockHash].TrimmedBlock.NextConsensus,
+                Witness = new Witness
                 {
-                    Version = 0,
-                    PrevHash = Blockchain.Default.CurrentBlockHash,
-                    MerkleRoot = new UInt256(),
-                    Timestamp = Blockchain.Default.GetHeader(Blockchain.Default.Height).Timestamp + Blockchain.SecondsPerBlock,
-                    Index = Blockchain.Default.Height + 1,
-                    ConsensusData = 0,
-                    NextConsensus = Blockchain.Default.GetHeader(Blockchain.Default.Height).NextConsensus,
-                    Script = new Witness
-                    {
-                        InvocationScript = new byte[0],
-                        VerificationScript = new byte[0]
-                    },
-                    Transactions = new Transaction[0]
-                };
-            DataCache<UInt160, AccountState> accounts = Blockchain.Default.CreateCache<UInt160, AccountState>();
-            DataCache<ECPoint, ValidatorState> validators = Blockchain.Default.CreateCache<ECPoint, ValidatorState>();
-            DataCache<UInt256, AssetState> assets = Blockchain.Default.CreateCache<UInt256, AssetState>();
-            DataCache<UInt160, ContractState> contracts = Blockchain.Default.CreateCache<UInt160, ContractState>();
-
-            DataCache<StorageKey, StorageItem> storages = Blockchain.Default.CreateCache<StorageKey, StorageItem>();
-
-            CachedScriptTable script_table = new CachedScriptTable(contracts);
-
-            StateMachine service = new StateMachine(persisting_block, accounts, validators, assets, contracts, storages);
-
-            ApplicationEngine engine = new ApplicationEngine(TriggerType.Application, container, script_table,Blockchain.Default, service, Fixed8.Zero, true);
-
-            engine.LoadScript(script, false);
-
+                    InvocationScript = new byte[0],
+                    VerificationScript = new byte[0]
+                },
+                Transactions = new Transaction[0]
+            };
+            ApplicationEngine engine = new ApplicationEngine(TriggerType.Application, container, snapshot, extraGAS, testMode);
+            engine.LoadScript(script);
             engine.Execute();
-
             return engine;
+        }
+
+        public static ApplicationEngine Run(byte[] script, IScriptContainer container = null, Block persistingBlock = null, bool testMode = false, Fixed8 extraGAS = default(Fixed8))
+        {
+            using (Snapshot snapshot = Blockchain.Singleton.GetSnapshot())
+            {
+                return Run(script, snapshot, container, persistingBlock, testMode, extraGAS);
+            }
         }
     }
 }

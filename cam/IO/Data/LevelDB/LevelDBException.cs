@@ -2,7 +2,7 @@
 
 namespace Cam.IO.Data.LevelDB
 {
-    internal class LevelDBException : DbException
+    public class LevelDBException : DbException
     {
         internal LevelDBException(string message)
             : base(message)

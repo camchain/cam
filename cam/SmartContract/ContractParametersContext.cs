@@ -1,6 +1,8 @@
-﻿using Cam.Core;
-using Cam.Cryptography.ECC;
+﻿using Cam.Cryptography.ECC;
 using Cam.IO.Json;
+using Cam.Ledger;
+using Cam.Network.P2P.Payloads;
+using Cam.Persistence;
 using Cam.VM;
 using System;
 using System.Collections.Generic;
@@ -76,9 +78,10 @@ namespace Cam.SmartContract
             get
             {
                 if (_ScriptHashes == null)
-                {
-                    _ScriptHashes = Verifiable.GetScriptHashesForVerifying();
-                }
+                    using (Snapshot snapshot = Blockchain.Singleton.GetSnapshot())
+                    {
+                        _ScriptHashes = Verifiable.GetScriptHashesForVerifying(snapshot);
+                    }
                 return _ScriptHashes;
             }
         }
@@ -99,7 +102,7 @@ namespace Cam.SmartContract
 
         public bool AddSignature(Contract contract, ECPoint pubkey, byte[] signature)
         {
-            if (contract.IsMultiSigContract())
+            if (contract.Script.IsMultiSigContract())
             {
                 ContextItem item = CreateItem(contract);
                 if (item == null) return false;
@@ -157,9 +160,10 @@ namespace Cam.SmartContract
                         else
                             index = i;
 
-                if(index == -1) {
-
-
+                if (index == -1)
+                {
+                    // unable to find ContractParameterType.Signature in contract.ParameterList 
+                    // return now to prevent array index out of bounds exception
                     return false;
                 }
                 return Add(contract, index, signature);
@@ -206,10 +210,10 @@ namespace Cam.SmartContract
             return item.Parameters;
         }
 
-        public Witness[] GetScripts()
+        public Witness[] GetWitnesses()
         {
             if (!Completed) throw new InvalidOperationException();
-            Witness[] scripts = new Witness[ScriptHashes.Count];
+            Witness[] witnesses = new Witness[ScriptHashes.Count];
             for (int i = 0; i < ScriptHashes.Count; i++)
             {
                 ContextItem item = ContextItems[ScriptHashes[i]];
@@ -219,14 +223,14 @@ namespace Cam.SmartContract
                     {
                         sb.EmitPush(parameter);
                     }
-                    scripts[i] = new Witness
+                    witnesses[i] = new Witness
                     {
                         InvocationScript = sb.ToArray(),
                         VerificationScript = item.Script ?? new byte[0]
                     };
                 }
             }
-            return scripts;
+            return witnesses;
         }
 
         public static ContractParametersContext Parse(string value)

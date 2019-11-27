@@ -1,11 +1,12 @@
-﻿using Cam.Core;
-using Cam.Cryptography.ECC;
-using FluentAssertions;
+﻿using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Cam.Cryptography.ECC;
+using Cam.IO;
+using Cam.Ledger;
+using Cam.Network.P2P.Payloads;
 using System.Globalization;
 using System.IO;
 using System.Text;
-using System.Threading;
 
 namespace Cam.UnitTests
 {
@@ -57,7 +58,7 @@ namespace Cam.UnitTests
         [TestMethod]
         public void Name_Set()
         {
-            string val = "wake up Cam";
+            string val = "wake up cam";
             uut.Name = val;
             uut.Name.Should().Be(val);
         }
@@ -214,7 +215,7 @@ namespace Cam.UnitTests
             assetType = AssetType.Token;
             assetState.AssetType = assetType;
 
-            name = "Cam";
+            name = "cam";
             assetState.Name = name;
 
             amount = new Fixed8(42);
@@ -264,7 +265,7 @@ namespace Cam.UnitTests
 
             uut.Size.Should().Be(130); // 1 + 32 + 1 + 4 + 8 + 8 + 1 + 1 + 8 + 20 + 1 + 20 + 20 + 4 + 1
         }
-     
+
         [TestMethod]
         public void Clone()
         {
@@ -414,7 +415,7 @@ namespace Cam.UnitTests
             bool isFrozen;
             setupAssetStateWithValues(uut, out assetId, out assetType, out name, out amount, out available, out precision, out fee, out feeAddress, out owner, out admin, out issuer, out expiration, out isFrozen);
 
-            uut.GetName().Should().Be("Cam");
+            uut.GetName().Should().Be("cam");
             // The base class GetName() method should be be optimised to avoid the slow try / catch
         }
 

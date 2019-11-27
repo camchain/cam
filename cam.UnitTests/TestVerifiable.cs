@@ -1,6 +1,7 @@
+using Cam.Network.P2P.Payloads;
+using Cam.Persistence;
 using System;
 using System.IO;
-using Cam.Core;
 
 namespace Cam.UnitTests
 {
@@ -8,7 +9,7 @@ namespace Cam.UnitTests
     {
         private string testStr = "testStr";
 
-        public Witness[] Scripts { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+        public Witness[] Witnesses { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
 
         public int Size => throw new NotImplementedException();
 
@@ -27,7 +28,7 @@ namespace Cam.UnitTests
             throw new NotImplementedException();
         }
 
-        public UInt160[] GetScriptHashesForVerifying()
+        public UInt160[] GetScriptHashesForVerifying(Snapshot snapshot)
         {
             throw new NotImplementedException();
         }
