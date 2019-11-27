@@ -432,10 +432,10 @@ namespace Cam.UnitTests
             uint expiration;
             bool isFrozen;
             setupAssetStateWithValues(uut, out assetId, out assetType, out name, out amount, out available, out precision, out fee, out feeAddress, out owner, out admin, out issuer, out expiration, out isFrozen);
-            uut.Name = "[{\"lang\":\"zh-CN\",\"name\":\"小蚁股\"},{\"lang\":\"en\",\"name\":\"Cam\"}]";
+            uut.Name = "[{\"lang\":\"zh-CN\",\"name\":\"CAM\"},{\"lang\":\"en\",\"name\":\"CAM\"}]";
 
-            uut.GetName(new CultureInfo("zh-CN")).Should().Be("小蚁股");
-            uut.GetName(new CultureInfo("en")).Should().Be("Cam");
+            uut.GetName(new CultureInfo("zh-CN")).Should().Be("CAM");
+            uut.GetName(new CultureInfo("en")).Should().Be("CAM");
         }
 
         [TestMethod]
@@ -451,10 +451,10 @@ namespace Cam.UnitTests
             uint expiration;
             bool isFrozen;
             setupAssetStateWithValues(uut, out assetId, out assetType, out name, out amount, out available, out precision, out fee, out feeAddress, out owner, out admin, out issuer, out expiration, out isFrozen);
-            uut.Name = "[{\"lang\":\"zh-CN\",\"name\":\"小蚁股\"},{\"lang\":\"en\",\"name\":\"Cam\"}]";
+            uut.Name = "[{\"lang\":\"zh-CN\",\"name\":\"CAM\"},{\"lang\":\"en\",\"name\":\"CAM\"}]";
 
             CultureInfo.CurrentCulture = new CultureInfo("en");
-            uut.GetName().Should().Be("Cam");
+            uut.GetName().Should().Be("CAM");
         }
 
         [TestMethod]
@@ -470,10 +470,10 @@ namespace Cam.UnitTests
             uint expiration;
             bool isFrozen;
             setupAssetStateWithValues(uut, out assetId, out assetType, out name, out amount, out available, out precision, out fee, out feeAddress, out owner, out admin, out issuer, out expiration, out isFrozen);
-            uut.Name = "[{\"lang\":\"zh-CN\",\"name\":\"小蚁股\"},{\"lang\":\"en\",\"name\":\"Cam\"}]";
+            uut.Name = "[{\"lang\":\"zh-CN\",\"name\":\"CAM\"},{\"lang\":\"en\",\"name\":\"CAM\"}]";
 
             CultureInfo.CurrentCulture = new CultureInfo("zh-CN");
-            uut.GetName().Should().Be("小蚁股");
+            uut.GetName().Should().Be("CAM");
         }
 
         [TestMethod]
@@ -489,10 +489,10 @@ namespace Cam.UnitTests
             uint expiration;
             bool isFrozen;
             setupAssetStateWithValues(uut, out assetId, out assetType, out name, out amount, out available, out precision, out fee, out feeAddress, out owner, out admin, out issuer, out expiration, out isFrozen);
-            uut.Name = "[{\"lang\":\"zh-CN\",\"name\":\"小蚁股\"},{\"lang\":\"en\",\"name\":\"Cam\"}]";
+            uut.Name = "[{\"lang\":\"zh-CN\",\"name\":\"CAM\"},{\"lang\":\"en\",\"name\":\"CAM\"}]";
 
             CultureInfo.CurrentCulture = new CultureInfo("de-DE");
-            uut.GetName().Should().Be("Cam"); // defaults to english IF english is in the name
+            uut.GetName().Should().Be("CAM"); // defaults to english IF english is in the name
         }
 
         [TestMethod]
@@ -508,10 +508,10 @@ namespace Cam.UnitTests
             uint expiration;
             bool isFrozen;
             setupAssetStateWithValues(uut, out assetId, out assetType, out name, out amount, out available, out precision, out fee, out feeAddress, out owner, out admin, out issuer, out expiration, out isFrozen);
-            uut.Name = "[{\"lang\":\"zh-CN\",\"name\":\"小蚁股\"},{\"lang\":\"foo\",\"name\":\"bar\"}]";
+            uut.Name = "[{\"lang\":\"zh-CN\",\"name\":\"CAM\"},{\"lang\":\"foo\",\"name\":\"CAM\"}]";
 
             CultureInfo.CurrentCulture = new CultureInfo("de-DE");
-            uut.GetName().Should().Be("小蚁股"); // defaults to first name IF english is not in the name
+            uut.GetName().Should().Be("CAM"); // defaults to first name IF english is not in the name
         }
 
 

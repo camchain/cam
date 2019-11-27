@@ -10,10 +10,10 @@
     <AssemblyName>Cam</AssemblyName>
     <PackageId>Cam</PackageId>
     <PackageTags>Cam;Camchain;Blockchain;Smart Contract</PackageTags>
-    <PackageProjectUrl>https://github.com/camchain/Cam</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/camchain/cam</PackageProjectUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryType>git</RepositoryType>
-    <RepositoryUrl>https://github.com/Cam-project/Cam.git</RepositoryUrl>
+    <RepositoryUrl>https://github.com/camchain/cam.git</RepositoryUrl>
     <RootNamespace>Cam</RootNamespace>
     <Company>Camchain</Company>
     <Description>Cam</Description>
