@@ -1,3 +1,20 @@
+<p align="center">
+<img
+    src="https://avatars2.githubusercontent.com/u/34855698?s=460&v=4" width="250px">
+</p>
+
+<p align="center">      
+  <a href="https://travis-ci.org/camchain/cam-server">
+    <img src="https://travis-ci.org/camchain/cam-server.svg?branch=master">
+  </a>
+  <a href="https://github.com/camchain/cam-server/blob/master/LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-blue.svg">
+  </a>
+  <a href="https://github.com/camchain/cam-server/releases">
+    <img src="https://badge.fury.io/gh/camchain%2Fcam-server.svg" alt="Current cam-server version.">
+  </a>  
+</p>
+
 
 Supported Platforms
 --------
