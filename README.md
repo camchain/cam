@@ -4,14 +4,14 @@
 </p>
 
 <p align="center">      
-  <a href="https://travis-ci.org/camchain/cam-server">
-    <img src="https://travis-ci.org/camchain/cam-server.svg?branch=master">
+  <a href="https://travis-ci.org/camchain/cam">
+    <img src="https://travis-ci.org/camchain/cam.svg?branch=master">
   </a>
-  <a href="https://github.com/camchain/cam-server/blob/master/LICENSE">
+  <a href="https://github.com/camchain/cam/blob/master/LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-blue.svg">
   </a>
-  <a href="https://github.com/camchain/cam-server/releases">
-    <img src="https://badge.fury.io/gh/camchain%2Fcam-server.svg" alt="Current cam-server version.">
+  <a href="https://github.com/camchain/cam/releases">
+    <img src="https://badge.fury.io/gh/camchain%2Fcam.svg" alt="Current cam-server version.">
   </a>  
 </p>
 
